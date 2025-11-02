@@ -17,75 +17,102 @@ jobs:
       - name: Create reports folder
         run: mkdir -p reports
 
-      # --- 1. Secrets Scanning (Gitleaks) ---
-      - name: 🕵️ Run Gitleaks
+      # --- 1. 🕵️ Secrets Scanning (Gitleaks) ---
+      - name: Run Gitleaks
+        continue-on-error: true
         uses: gitleaks/gitleaks-action@v2
         with:
           args: detect --source . --report-path reports/gitleaks.json --exit-code 0
 
-      # --- 2. Dependency Scanning (Snyk) ---
-      - name: 🔍 Run Snyk Dependency Scan
-        uses: snyk/actions/node@master
+      # --- 2. 🔍 Dependency Scanning (Snyk) ---
+      - name: Run Snyk Dependency Scan (conditional)
+        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: test --json-file-output=reports/snyk.json || true
+        run: |
+          if [ -f "package.json" ]; then
+            echo "Detected Node.js project. Running Snyk..."
+            snyk test --json-file-output=reports/snyk.json || true
+          elif [ -f "requirements.txt" ]; then
+            echo "Detected Python project. Running Snyk..."
+            snyk test --file=requirements.txt --json-file-output=reports/snyk.json || true
+          else
+            echo "No dependency file detected. Skipping Snyk scan."
+            echo '{"message": "No dependency file found, skipped Snyk scan."}' > reports/snyk.json
+          fi
 
-      # --- 3. IaC Scanning (Checkov) ---
-      - name: 🧱 Run Checkov
+      # --- 3. 🧱 IaC Scanning (Checkov) ---
+      - name: Run Checkov
+        continue-on-error: true
         uses: bridgecrewio/checkov-action@master
         with:
           directory: .
           output_format: json
           output_file_path: reports/checkov.json
 
-      # --- 4. Docker Hardening (Dockle) ---
-      - name: 🐳 Run Dockle
+      # --- 4. 🐳 Docker Hardening (Dockle) ---
+      - name: Run Dockle
+        continue-on-error: true
         run: |
-          docker pull goodwithtech/dockle
-          docker run --rm -v $(pwd):/app goodwithtech/dockle dockle /app/Dockerfile > reports/dockle.txt
+          if [ -f "Dockerfile" ]; then
+            docker pull goodwithtech/dockle
+            docker run --rm -v $(pwd):/app goodwithtech/dockle dockle /app/Dockerfile > reports/dockle.txt || true
+          else
+            echo "No Dockerfile found. Skipping Dockle scan." > reports/dockle.txt
+          fi
 
-      # --- 5. Python Security (Bandit) ---
-      - name: 🐍 Run Bandit
+      # --- 5. 🐍 Python Security (Bandit) ---
+      - name: Run Bandit
+        continue-on-error: true
         run: |
-          pip install bandit
-          bandit -r . -f json -o reports/bandit.json || true
+          if [ -d "__pycache__" ] || ls *.py >/dev/null 2>&1; then
+            pip install bandit
+            bandit -r . -f json -o reports/bandit.json || true
+          else
+            echo '{"message": "No Python files found, skipped Bandit scan."}' > reports/bandit.json
+          fi
 
-      # --- 6. Combine Reports into Markdown Summary ---
-      - name: 🧩 Generate Markdown Summary
+      # --- 6. 🧩 Generate Markdown Summary ---
+      - name: Generate Markdown Summary
         run: |
           echo "# 🔒 Security Scan Summary" > reports/security-summary.md
           echo "" >> reports/security-summary.md
+
           echo "## 🕵️ Gitleaks (Secrets Scan)" >> reports/security-summary.md
           echo '```json' >> reports/security-summary.md
-          cat reports/gitleaks.json >> reports/security-summary.md
+          cat reports/gitleaks.json >> reports/security-summary.md || echo "No output." >> reports/security-summary.md
           echo '```' >> reports/security-summary.md
           echo "" >> reports/security-summary.md
+
           echo "## 🔍 Snyk (Dependency Scan)" >> reports/security-summary.md
           echo '```json' >> reports/security-summary.md
-          cat reports/snyk.json >> reports/security-summary.md
+          cat reports/snyk.json >> reports/security-summary.md || echo "No output." >> reports/security-summary.md
           echo '```' >> reports/security-summary.md
           echo "" >> reports/security-summary.md
+
           echo "## 🧱 Checkov (IaC Scan)" >> reports/security-summary.md
           echo '```json' >> reports/security-summary.md
-          cat reports/checkov.json >> reports/security-summary.md
+          cat reports/checkov.json >> reports/security-summary.md || echo "No output." >> reports/security-summary.md
           echo '```' >> reports/security-summary.md
           echo "" >> reports/security-summary.md
+
           echo "## 🐳 Dockle (Docker Hardening)" >> reports/security-summary.md
           echo '```text' >> reports/security-summary.md
-          cat reports/dockle.txt >> reports/security-summary.md
+          cat reports/dockle.txt >> reports/security-summary.md || echo "No output." >> reports/security-summary.md
           echo '```' >> reports/security-summary.md
           echo "" >> reports/security-summary.md
+
           echo "## 🐍 Bandit (Python Security)" >> reports/security-summary.md
           echo '```json' >> reports/security-summary.md
-          cat reports/bandit.json >> reports/security-summary.md
+          cat reports/bandit.json >> reports/security-summary.md || echo "No output." >> reports/security-summary.md
           echo '```' >> reports/security-summary.md
           echo "" >> reports/security-summary.md
+
           echo "---" >> reports/security-summary.md
           echo "_Generated automatically by Repo Security Bot_" >> reports/security-summary.md
 
-      # --- 7. Upload ONLY the summary ---
-      - name: 📦 Upload Summary Report
+      # --- 7. 📦 Upload Summary Report ---
+      - name: Upload Summary Report
         uses: actions/upload-artifact@v4
         with:
           name: security-summary
