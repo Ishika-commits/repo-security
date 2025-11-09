@@ -6,7 +6,6 @@ on:
   pull_request:
   schedule:
     - cron: "0 12 * * *" # runs daily at noon
-  # Allow manual triggering from the Actions tab
   workflow_dispatch:
 
 jobs:
@@ -24,7 +23,6 @@ jobs:
         continue-on-error: true
         run: |
           echo "Pulling Gitleaks image..."
-          # FIX: Use the correct image path from GitHub Container Registry
           docker pull ghcr.io/gitleaks/gitleaks:latest
           
           echo "Running Gitleaks..."
@@ -48,34 +46,24 @@ jobs:
           set -e
           echo "Checking for dependency files..."
           if [ -f "package.json" ]; then
-            echo "Node.js project detected."
             snyk test --json-file-output=reports/snyk.json || true
           elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "Pipfile" ]; then
-            echo "Python project detected."
             snyk test --json-file-output=reports/snyk.json || true
           elif [ -f "pom.xml" ]; then
-            echo "Java Maven project detected."
             snyk test --file=pom.xml --json-file-output=reports/snyk.json || true
           elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
-            echo "Java Gradle project detected."
             snyk test --json-file-output=reports/snyk.json || true
           elif [ -f "go.mod" ]; then
-            echo "Go project detected."
             snyk test --file=go.mod --json-file-output=reports/snyk.json || true
           elif [ -f "Gemfile" ]; then
-            echo "Ruby project detected."
             snyk test --file=Gemfile --json-file-output=reports/snyk.json || true
           elif [ -f "Cargo.toml" ]; then
-            echo "Rust project detected."
             snyk test --file=Cargo.toml --json-file-output=reports/snyk.json || true
           elif [ -f "composer.json" ]; then
-            echo "PHP project detected."
             snyk test --file=composer.json --json-file-output=reports/snyk.json || true
           elif ls *.csproj >/dev/null 2>&1; then
-            echo ".NET project detected."
             snyk test --json-file-output=reports/snyk.json || true
           else
-            echo "No known dependency file detected. Skipping Snyk scan."
             echo '{"message": "No dependency files found, skipped Snyk scan."}' > reports/snyk.json
           fi
 
@@ -88,34 +76,14 @@ jobs:
         run: |
           checkov -d . -o json > reports/checkov_results.json || true
 
-
-
-          
-
-      - name: Move Checkov Report
-        if: always() 
-        run: |
-          if [ -f "checkov_results.json" ]; then
-            mv checkov_results.json reports/
-          else
-            echo "Checkov report not found. Creating placeholder."
-            echo '{"message": "Checkov scan failed or no files found."}' > reports/checkov_results.json
-          fi
-
       # --- 4. 🐳 Docker Hardening (Dockle) ---
       - name: Run Dockle
         continue-on-error: true
         run: |
           if [ -f "Dockerfile" ]; then
             echo "Dockerfile found. Building and scanning..."
-            
-            # 1. BUILD THE IMAGE
             docker build -t my-scan-image:latest .
-            
-            # 2. PULL THE DOCKLE IMAGE
             docker pull goodwithtech/dockle
-            
-            # 3. SCAN THE IMAGE
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -v ${{ github.workspace }}/reports:/reports \
@@ -123,9 +91,7 @@ jobs:
               -f json \
               -o /reports/dockle.json \
               my-scan-image:latest || true
-              
           else
-            echo "No Dockerfile found. Skipping Dockle scan."
             echo '{"message": "No Dockerfile found, skipped Dockle scan."}' > reports/dockle.json
           fi
 
@@ -134,11 +100,9 @@ jobs:
         continue-on-error: true
         run: |
           if ls *.py >/dev/null 2>&1; then
-            echo "Python files found. Installing and running Bandit..."
             pip install bandit
             bandit -r . -f json -o reports/bandit.json || true
           else
-            echo "No Python files found. Skipping Bandit scan."
             echo '{"message": "No Python files found, skipped Bandit scan."}' > reports/bandit.json
           fi
 
@@ -171,27 +135,19 @@ jobs:
 
           echo "## 🧱 Checkov (IaC Scan)" >> reports/security-summary.md
           if [ -s "reports/checkov_results.json" ]; then
-            if grep -q "Checkov scan failed" reports/checkov_results.json; then
-              echo "_Checkov scan failed or no files found._" >> reports/security-summary.md
-            else
-              echo '```json' >> reports/security-summary.md
-              cat reports/checkov_results.json >> reports/security-summary.md
-              echo '```' >> reports/security-summary.md
-            fi
+            echo '```json' >> reports/security-summary.md
+            cat reports/checkov_results.json >> reports/security-summary.md
+            echo '```' >> reports/security-summary.md
           else
-            echo "_Checkov report file not found._" >> reports/security-summary.md
+            echo "_Checkov report not found._" >> reports/security-summary.md
           fi
           echo "" >> reports/security-summary.md
 
           echo "## 🐳 Dockle (Docker Hardening)" >> reports/security-summary.md
           if [ -s "reports/dockle.json" ]; then
-            if grep -q "No Dockerfile found" reports/dockle.json; then
-              echo "_No Dockerfile found._" >> reports/security-summary.md
-            else
-              echo '```json' >> reports/security-summary.md
-              cat reports/dockle.json >> reports/security-summary.md
-              echo '```' >> reports/security-summary.md
-            fi
+            echo '```json' >> reports/security-summary.md
+            cat reports/dockle.json >> reports/security-summary.md
+            echo '```' >> reports/security-summary.md
           else
             echo "_Dockle scan failed._" >> reports/security-summary.md
           fi
@@ -199,14 +155,9 @@ jobs:
 
           echo "## 🐍 Bandit (Python Security)" >> reports/security-summary.md
           if [ -s "reports/bandit.json" ]; then
-            if grep -q "No Python files found" reports/bandit.json;
-            then
-              echo "_No Python files found._" >> reports/security-summary.md
-            else
-              echo '```json' >> reports/security-summary.md
-              cat reports/bandit.json >> reports/security-summary.md
-              echo '```' >> reports/security-summary.md
-            fi
+            echo '```json' >> reports/security-summary.md
+            cat reports/bandit.json >> reports/security-summary.md
+            echo '```' >> reports/security-summary.md
           else
             echo "_Bandit scan failed._" >> reports/security-summary.md
           fi
