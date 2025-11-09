@@ -24,16 +24,18 @@ jobs:
         continue-on-error: true
         run: |
           echo "Pulling Gitleaks image..."
-          docker pull gitleaks/gitleaks:latest
+          # FIX: Use the correct image path from GitHub Container Registry
+          docker pull ghcr.io/gitleaks/gitleaks:latest
           
           echo "Running Gitleaks..."
           docker run --rm \
             -v ${{ github.workspace }}:/repo \
-            gitleaks/gitleaks:latest detect \
+            ghcr.io/gitleaks/gitleaks:latest detect \
             --source /repo \
             --report-path /repo/reports/gitleaks.json \
             --report-format json \
             --exit-code 0
+
       # --- 2. 🔍 Dependency Scanning (Snyk) ---
       - name: Setup Snyk
         uses: snyk/actions/setup@master
@@ -136,7 +138,7 @@ jobs:
             echo '{"message": "No Python files found, skipped Bandit scan."}' > reports/bandit.json
           fi
 
-      # --- 6. 🧩 Generate Markdown Summary (FIXED) ---
+      # --- 6. 🧩 Generate Markdown Summary ---
       - name: Generate Markdown Summary
         if: always() 
         run: |
@@ -169,7 +171,6 @@ jobs:
               echo "_Checkov scan failed or no files found._" >> reports/security-summary.md
             else
               echo '```json' >> reports/security-summary.md
-              # FIX: Appending to security-summary.md
               cat reports/checkov_results.json >> reports/security-summary.md
               echo '```' >> reports/security-summary.md
             fi
@@ -184,7 +185,6 @@ jobs:
               echo "_No Dockerfile found._" >> reports/security-summary.md
             else
               echo '```json' >> reports/security-summary.md
-              # FIX: Appending to security-summary.md
               cat reports/dockle.json >> reports/security-summary.md
               echo '```' >> reports/security-summary.md
             fi
@@ -195,11 +195,11 @@ jobs:
 
           echo "## 🐍 Bandit (Python Security)" >> reports/security-summary.md
           if [ -s "reports/bandit.json" ]; then
-            if grep -q "No Python files found" reports/bandit.json; then
+            if grep -q "No Python files found" reports/bandit.json;
+            then
               echo "_No Python files found._" >> reports/security-summary.md
             else
               echo '```json' >> reports/security-summary.md
-              # FIX: Appending to security-summary.md
               cat reports/bandit.json >> reports/security-summary.md
               echo '```' >> reports/security-summary.md
             fi
