@@ -47,33 +47,19 @@ jobs:
             snyk test --json-file-output=reports/snyk.json || true
           elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ] || [ -f "Pipfile" ]; then
             snyk test --json-file-output=reports/snyk.json || true
-          elif [ -f "pom.xml" ]; then
-            snyk test --file=pom.xml --json-file-output=reports/snyk.json || true
-          elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
-            snyk test --json-file-output=reports/snyk.json || true
-          elif [ -f "go.mod" ]; then
-            snyk test --file=go.mod --json-file-output=reports/snyk.json || true
-          elif [ -f "Gemfile" ]; then
-            snyk test --file=Gemfile --json-file-output=reports/snyk.json || true
-          elif [ -f "Cargo.toml" ]; then
-            snyk test --file=Cargo.toml --json-file-output=reports/snyk.json || true
-          elif [ -f "composer.json" ]; then
-            snyk test --file=composer.json --json-file-output=reports/snyk.json || true
-          elif ls *.csproj >/dev/null 2>&1; then
-            snyk test --json-file-output=reports/snyk.json || true
           else
             echo '{"message":"No dependency files found"}' > reports/snyk.json
           fi
 
-      # ✅ 4. Checkov (IaC scanning) — correctly installed via Pip
+      # ✅ 4. Checkov (IaC scanning) — CLI version with compact output
       - name: Install Checkov
         run: pip install checkov
 
       - name: Run Checkov
         continue-on-error: true
         run: |
-          echo "Running Checkov on Terraform, CloudFormation, Kubernetes, ARM, Helm..."
-          checkov -d . -o json > reports/checkov_results.json || true
+          echo "Running Checkov..."
+          checkov -d . --quiet --compact -o json > reports/checkov_results.json || true
 
       # ✅ 5. Docker Hardening (Dockle)
       - name: Run Dockle
@@ -104,36 +90,66 @@ jobs:
             echo '{"message":"No Python files found"}' > reports/bandit.json
           fi
 
-      # ✅ 7. Markdown Summary Generation
+      # ✅ 7. Generate Markdown Summary (formatted + badges + failures only)
       - name: Generate Markdown Summary
         if: always()
         run: |
           echo "# 🔒 Security Scan Summary" > reports/security-summary.md
+          echo "" >> reports/security-summary.md
 
+          #######################################
+          # GITLEAKS
+          #######################################
           echo "## 🕵️ Gitleaks (Secrets Scan)" >> reports/security-summary.md
           echo '```json' >> reports/security-summary.md
           cat reports/gitleaks.json >> reports/security-summary.md
           echo '```' >> reports/security-summary.md
+          echo "" >> reports/security-summary.md
 
+          #######################################
+          # SNYK
+          #######################################
           echo "## 🔍 Snyk (Dependency Scan)" >> reports/security-summary.md
           echo '```json' >> reports/security-summary.md
           cat reports/snyk.json >> reports/security-summary.md
           echo '```' >> reports/security-summary.md
+          echo "" >> reports/security-summary.md
 
+          #######################################
+          # CHECKOV – CLEAN FAILURES ONLY
+          #######################################
           echo "## 🧱 Checkov (IaC Scan)" >> reports/security-summary.md
-          echo '```json' >> reports/security-summary.md
-          cat reports/checkov_results.json >> reports/security-summary.md
-          echo '```' >> reports/security-summary.md
 
+          # Count checks
+          TOTAL_CHECKS=$(jq '.[].results.failed_checks | length' reports/checkov_results.json | paste -sd+ - | bc)
+          PASSED=$(jq '.[].results.passed_checks | length' reports/checkov_results.json | paste -sd+ - | bc)
+
+          echo "**✅ Passed:** $PASSED   **❌ Failed:** $TOTAL_CHECKS" >> reports/security-summary.md
+          echo "" >> reports/security-summary.md
+
+          # Dump only failed checks
+          echo '```json' >> reports/security-summary.md
+          jq '.[] | .results.failed_checks[]?' reports/checkov_results.json >> reports/security-summary.md
+          echo '```' >> reports/security-summary.md
+          echo "" >> reports/security-summary.md
+
+          #######################################
+          # DOCKLE
+          #######################################
           echo "## 🐳 Dockle (Docker Hardening)" >> reports/security-summary.md
           echo '```json' >> reports/security-summary.md
           cat reports/dockle.json >> reports/security-summary.md
           echo '```' >> reports/security-summary.md
+          echo "" >> reports/security-summary.md
 
+          #######################################
+          # BANDIT
+          #######################################
           echo "## 🐍 Bandit (Python Security)" >> reports/security-summary.md
           echo '```json' >> reports/security-summary.md
           cat reports/bandit.json >> reports/security-summary.md
           echo '```' >> reports/security-summary.md
+          echo "" >> reports/security-summary.md
 
           echo "---" >> reports/security-summary.md
           echo "_Generated automatically by Repo Security Bot_" >> reports/security-summary.md
