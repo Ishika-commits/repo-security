@@ -11,7 +11,7 @@ on:
 jobs:
 
   # ---------------------------------------------------
-  # 1. Run each scanner as a reusable workflow
+  # 1. Each scanner as a reusable workflow
   # ---------------------------------------------------
   gitleaks:
     uses: arinagrawal05/repo-security-bot/.github/workflows/scan-gitleaks.yml@main
@@ -31,7 +31,7 @@ jobs:
     uses: arinagrawal05/repo-security-bot/.github/workflows/scan-bandit.yml@main
 
   # ---------------------------------------------------
-  # 2. Summary job — runs AFTER all scans finish
+  # 2. Summary job
   # ---------------------------------------------------
   generate-summary:
     runs-on: ubuntu-latest
@@ -47,51 +47,115 @@ jobs:
         uses: actions/checkout@v4
 
       # ---------------------------------------------------
-      # DOWNLOAD ALL REPORTS
+      # DOWNLOAD ALL ARTIFACTS
       # ---------------------------------------------------
-      - name: Download Gitleaks report
+      - name: Download Gitleaks
         uses: actions/download-artifact@v4
         with:
           name: gitleaks-report
 
-      - name: Download Snyk report
+      - name: Download Snyk
         uses: actions/download-artifact@v4
         with:
           name: snyk-report
 
-      - name: Download Checkov report
+      - name: Download Checkov
         uses: actions/download-artifact@v4
         with:
           name: checkov-report
 
-      - name: Download Dockle report
+      - name: Download Dockle
         uses: actions/download-artifact@v4
         with:
           name: dockle-report
 
-      - name: Download Bandit report
+      - name: Download Bandit
         uses: actions/download-artifact@v4
         with:
           name: bandit-report
 
-      - name: Create reports folder
-        run: mkdir -p reports
-
+      # ---------------------------------------------------
+      # MOVE ALL DOWNLOADED JSON REPORTS
+      # ---------------------------------------------------
       - name: Move reports
         run: |
-          mv gitleaks.json reports/
-          mv snyk.json reports/
-          mv checkov_results.json reports/
-          mv dockle.json reports/
-          mv bandit.json reports/
+          mkdir -p reports
+
+          mv gitleaks-report/gitleaks.json reports/ || true
+          mv snyk-report/snyk.json reports/ || true
+          mv checkov-report/checkov_results.json reports/ || true
+          mv dockle-report/dockle.json reports/ || true
+          mv bandit-report/bandit.json reports/ || true
+
+          echo "Reports moved:"
+          ls -R reports
 
       # ---------------------------------------------------
-      # SUMMARY GENERATION (your existing script goes here)
+      # GENERATE SUMMARY MARKDOWN
       # ---------------------------------------------------
       - name: Generate summary
         run: |
-          # your entire markdown generation block here (unchanged)
+          set -euo pipefail
+          SUMMARY="reports/security-summary.md"
 
+          echo "# 🔒 Security Scan Summary" > "$SUMMARY"
+          echo "" >> "$SUMMARY"
+
+          # Gitleaks
+          echo "## 🕵️ Gitleaks (Secrets Scan)" >> "$SUMMARY"
+          echo '```json' >> "$SUMMARY"
+          cat reports/gitleaks.json >> "$SUMMARY" || echo "{}" >> "$SUMMARY"
+          echo '```' >> "$SUMMARY"
+          echo "" >> "$SUMMARY"
+
+          # Snyk
+          echo "## 🔍 Snyk (Dependency Scan)" >> "$SUMMARY"
+          echo '```json' >> "$SUMMARY"
+          cat reports/snyk.json >> "$SUMMARY" || echo "{}" >> "$SUMMARY"
+          echo '```' >> "$SUMMARY"
+          echo "" >> "$SUMMARY"
+
+          # Checkov
+          echo "## 🧱 Checkov (IaC Scan)" >> "$SUMMARY"
+          if command -v jq >/dev/null 2>&1; then
+            TOTAL_FAILED=$(jq -r 'map(.results.failed_checks | length) | add // 0' reports/checkov_results.json)
+            TOTAL_PASSED=$(jq -r 'map(.results.passed_checks | length) | add // 0' reports/checkov_results.json)
+            echo "**✅ Passed:** ${TOTAL_PASSED}   **❌ Failed:** ${TOTAL_FAILED}" >> "$SUMMARY"
+            echo "" >> "$SUMMARY"
+            echo '```json' >> "$SUMMARY"
+            jq -c '.[] | .results.failed_checks[]?' reports/checkov_results.json >> "$SUMMARY" || echo "{}" >> "$SUMMARY"
+            echo '```' >> "$SUMMARY"
+          else
+            echo "_jq not available; raw output below_" >> "$SUMMARY"
+            echo '```json' >> "$SUMMARY"
+            cat reports/checkov_results.json >> "$SUMMARY" || echo "{}" >> "$SUMMARY"
+            echo '```' >> "$SUMMARY"
+          fi
+          echo "" >> "$SUMMARY"
+
+          # Dockle
+          echo "## 🐳 Dockle (Container Hardening)" >> "$SUMMARY"
+          echo '```json' >> "$SUMMARY"
+          cat reports/dockle.json >> "$SUMMARY" || echo "{}" >> "$SUMMARY"
+          echo '```' >> "$SUMMARY"
+          echo "" >> "$SUMMARY"
+
+          # Bandit
+          echo "## 🐍 Bandit (Python Security)" >> "$SUMMARY"
+          echo '```json' >> "$SUMMARY"
+          cat reports/bandit.json >> "$SUMMARY" || echo "{}" >> "$SUMMARY"
+          echo '```' >> "$SUMMARY"
+
+          echo "" >> "$SUMMARY"
+          echo "---" >> "$SUMMARY"
+          echo "_Generated automatically by Repo Security Bot_" >> "$SUMMARY"
+
+          echo "SUMMARY GENERATED:"
+          ls -lh reports
+
+      # ---------------------------------------------------
+      # UPLOAD SUMMARY
+      # ---------------------------------------------------
       - name: Upload summary
         uses: actions/upload-artifact@v4
         with:
