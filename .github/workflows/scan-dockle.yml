@@ -1,0 +1,41 @@
+name: "Scan: Dockle"
+
+on:
+  workflow_call:
+
+jobs:
+  dockle:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Dockle
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+
+          if [ -f "Dockerfile" ] || [ -f "Dockerfile.txt" ]; then
+            DOCKERFILE=$( [ -f Dockerfile ] && echo Dockerfile || echo Dockerfile.txt )
+            docker build -t security-image:latest -f "${DOCKERFILE}" . || true
+
+            docker pull goodwithtech/dockle:latest || true
+
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "${{ github.workspace }}/reports":/reports \
+              goodwithtech/dockle:latest \
+              -f json -o /reports/dockle.json security-image:latest || true
+          else
+            echo '{"message":"No Dockerfile found, skipped Dockle scan."}' > reports/dockle.json
+          fi
+
+          if [ ! -s reports/dockle.json ]; then
+            echo '{"message":"Dockle produced no output."}' > reports/dockle.json
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockle-report
+          path: reports/dockle.json
